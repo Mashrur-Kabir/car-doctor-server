@@ -1,14 +1,25 @@
 const express = require("express");
 const cors = require("cors");
+const jwt = require("jsonwebtoken")
+const cookieParser = require('cookie-parser')
 require("dotenv").config(); // for username, and password  
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express();
 const port = process.env.PORT || 5000;
 
-//middleware
-app.use(cors());
-app.use(express.json());
+const corsOption = {
+    origin: ['http://localhost:5173', ['http://localhost:5174']],
+    credentials: true
+}
+/*
+Setting credentials: true in the CORS options is important because it allows the server to accept cookies, authorization headers, or other credentials (like JWT tokens) from the client when making cross-origin requests.
+Without credentials: true, the browser will block these sensitive pieces of data from being sent to the server, which would break features like authentication or session management.
+*/
 
+//middleware
+app.use(cors(corsOption));
+app.use(express.json());
+app.use(cookieParser());
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster1.dwhia.mongodb.net/?retryWrites=true&w=majority&appName=Cluster1`;
 
@@ -20,6 +31,30 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   }
 });
+
+// middlewares
+const logger = async(req, res, next) => {
+  console.log('called', req.host, req.originalUrl)
+  next();
+}
+
+const verifyToken = async(req, res, next) => { //use it to secure webpages via token
+  const token = req.cookies?.token;
+  console.log("value of token in middleware: ", token)
+  if (!token) {
+    return res.status(401).json({ message: 'Access denied. No token provided.' });
+  }
+
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded)=> {
+    if (err) {
+        return res.status(403).json({ message: 'Access denied. Invalid token.' });
+    }
+    // if token is valid then it would be decoded
+    console.log('value in the token: ', decoded);
+    req.user = decoded;
+    next();
+  })
+}
 
 async function run() {
   try {
@@ -33,7 +68,7 @@ async function run() {
     
     //SERVICES
     // find all services
-    app.get('/services', async(req, res) => {
+    app.get('/services', logger, async(req, res) => {
         const cursor = serviceCollection.find();
         const result = await cursor.toArray();
         res.json(result);
@@ -65,8 +100,13 @@ async function run() {
     });
     
     //get booking details of user who is logged in to show it in booking component
-    app.get('/bookings', async(req, res) => {
+    app.get('/bookings', verifyToken, async(req, res) => {
         console.log(req.query.email);
+        //console.log('tokens received: ', req.cookies.token);
+        console.log('user in the valid token', req.user)
+        if (req.query.email !== req.user.email) {
+            return res.status(403).json({message: 'Forbidden Access!'});
+        }
         let query = {};
         if(req.query?.email){
             query = { email: req.query.email }
@@ -98,6 +138,21 @@ async function run() {
         res.send(result);
     })
 
+    //AUTH APIs
+    // login
+    app.post('/jwt', async(req, res) => {
+      const user = req.body;
+      console.log(user); // you will get the email here sent from the login component after successful login
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {expiresIn: '1h'}) //generating token. user is the payload here, and we need to generate secret and store in the .env file
+      
+      res.cookie('token', token, { // setting token in the cookie
+          httpOnly: true,
+          //secure: false,
+          //sameSite: 'none', // because client is in localhost 5173 and server is in localhost 5000
+          maxAge: 3600000 // 1 hour in milliseconds
+      })
+      res.send({success: true, token});
+  });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
@@ -119,20 +174,37 @@ app.listen(port, () => {
 });
 
 // Database Setup:
-
 // Connected to a MongoDB Atlas database using the MongoClient and secure .env credentials.
-// Endpoints:
 
+// Endpoints:
 // GET /services: Fetches all services from the services collection.
 // GET /services/:id: Fetches a specific service with a filtered projection.
-// POST /bookings: Inserts a new booking into the bookings collection.
-// Middleware:
+// POST /bookings: Inserts a new booking into the bookings collection....
+//....etc
 
+// Middleware:
 // cors for cross-origin requests.
 // express.json() to parse incoming JSON payloads.
+
 // Environment Variables:
-
 // Secured sensitive database credentials using .env.
-// MongoDB Query Optimization:
 
+// MongoDB Query Optimization:
 // Use of projections in /services/:id to limit the returned fields.
+
+/*
+verifyToken Middleware in get booking api:
+
+This checks if the client has sent a valid JWT token via cookies.
+If no token is found, it sends a 401 Unauthorized response.
+If the token is invalid, it sends a 403 Forbidden response.
+If the token is valid, it decodes the token (to extract user info) and attaches it to req.user, then proceeds to the next handler.
+/bookings Route:
+
+Protected by verifyToken, so only users with valid tokens can access it.
+Extracts the user's email from req.query.email (sent in the request) and compares it with the email from the token (req.user.email).
+If they don’t match, it sends a 403 Forbidden response.
+If they match, it queries the bookingCollection database for bookings matching the email and sends the results as the response.
+
+*/
+
