@@ -8,7 +8,8 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 const corsOption = {
-    origin: ['http://localhost:5173', ['http://localhost:5174']],
+    // origin: ['http://localhost:5173', 'http://localhost:5174'],
+    origin: ['https://cars-doctor-84eed.web.app'],
     credentials: true
 }
 /*
@@ -41,10 +42,12 @@ const logger = async(req, res, next) => {
 const verifyToken = async(req, res, next) => { //use it to secure webpages via token
   const token = req.cookies?.token;
   console.log("value of token in middleware: ", token)
+  // if no token available
   if (!token) {
     return res.status(401).json({ message: 'Access denied. No token provided.' });
   }
 
+  // verify token using secret key (generated in jwt.sign())
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded)=> {
     if (err) {
         return res.status(403).json({ message: 'Access denied. Invalid token.' });
@@ -56,10 +59,19 @@ const verifyToken = async(req, res, next) => { //use it to secure webpages via t
   })
 }
 
+const cookieOption = {
+    httpOnly: true,
+    //sameSite: 'none', // because client is in localhost 5173 and server is in localhost 5000
+    sameSite: process.env.NODE_ENV === "production" ? "none":"strict", //before deployment
+    //secure: false,
+    secure: process.env.NODE_ENV === "production" ? true : false, //before deployment
+    maxAge: 3600000 // 1 hour in milliseconds
+}
+
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // Connect the client to the server	(optional starting in v4.7) comment before deployment
+    // await client.connect();
 
     const serviceCollection = client.db('carDoctor').collection('services')
     const bookingCollection = client.db('carDoctor').collection('bookings');
@@ -101,9 +113,9 @@ async function run() {
     
     //get booking details of user who is logged in to show it in booking component
     app.get('/bookings', verifyToken, async(req, res) => {
-        console.log(req.query.email);
-        //console.log('tokens received: ', req.cookies.token);
-        console.log('user in the valid token', req.user)
+        console.log(req.query.email); // email in the api your're requesting
+        //console.log('tokens received: ', req.cookies.token); //will give you an object
+        console.log('user in the valid token: ', req.user) // req.user contains token owner info
         if (req.query.email !== req.user.email) {
             return res.status(403).json({message: 'Forbidden Access!'});
         }
@@ -143,19 +155,22 @@ async function run() {
     app.post('/jwt', async(req, res) => {
       const user = req.body;
       console.log(user); // you will get the email here sent from the login component after successful login
-      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {expiresIn: '1h'}) //generating token. user is the payload here, and we need to generate secret and store in the .env file
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {expiresIn: '2s'}) //generating token. user is the payload here, and we need to generate secret and store in the .env file
       
-      res.cookie('token', token, { // setting token in the cookie
-          httpOnly: true,
-          //secure: false,
-          //sameSite: 'none', // because client is in localhost 5173 and server is in localhost 5000
-          maxAge: 3600000 // 1 hour in milliseconds
-      })
-      res.send({success: true, token});
-  });
+      res.cookie('token', token, cookieOption) // setting token in the cookie with cookieOption object. (need cookie parser first)
+      res.send({success: true, token}); //'token' here is the name of the cookie
+    });
 
-    // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
+    //logout
+    app.post('/logout', async (req, res) =>{
+      const user = req.body;
+      console.log('logging out', user)
+      res.clearCookie('token', { ...cookieOption, maxAge: 0 }); // clearing token from the cookie. destructure cookieOptions before deployment
+      res.send({success: true, message: 'Logged out successfully'});
+    })
+
+    // Send a ping to confirm a successful connection (comment out before deploy)
+    // await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error

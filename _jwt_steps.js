@@ -1,19 +1,30 @@
 /*
+
+------------------------------------
+MAKE API SECURE USING JWT MIDDLEWARE
+------------------------------------
+
+CONCEPT:
+assign 2 token for each (access token, refresh token)
+-access token contains user identification, role, etc.. valid for a short period of time
+-refresh token is used to recreate the access token thats expired. if refresh is invalid, then log out the user
+
+
 in server:
-install jsonwebtoken
-jwt.sign
-generate secret and store that in env file
+npm install jsonwebtoken
+jwt.sign(). New token assigned to the user
+*generate secret and store that in env file
 
 in client:
 import jwt from 'jsonwebtoken';
 post user (currently logged in) to server
 
-
 set cookie in the client side via Http Only Cookie:
-    -install express cookie parser in server side first
-    -express set cookies; and then set the token (generated in the AUTH post api in index.js) in it and send it via res.send
-    -to set in client side- cors setting ion the server, axios settings in client side
-
+    -express set cookies; and then set the token (generated in the AUTH post api for login in index.js) in it and send it via res.send
+    -to set in client side- cors setting in the server (corsOptions), axios settings in client side (withCredentials())
+for secure api calls: (for example: user-specific info like bookings of a user (/bookings/:id in index.jsx))
+    -install express cookie parser (npm install cookie-parser) in server side
+    -then make middleware and verify token
 
 whole process: 
 
